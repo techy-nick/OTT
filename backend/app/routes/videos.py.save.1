@@ -1,0 +1,101 @@
+from fastapi import (
+    APIRouter,
+    UploadFile,
+    File,
+    Form,
+    Depends
+)
+
+from sqlalchemy.orm import Session
+
+import os
+
+from ..database import get_db
+from ..models import Video
+from ..schemas import VideoResponse
+from ..blob_storage import container_client
+from ..video_processor import convert_to_hls
+
+router = APIRouter(
+    prefix="/videos",
+    tags=["Videos"]
+)
+
+
+
+@router.post(
+    "/upload",
+    response_model=VideoResponse
+)
+async def upload_video(
+    title: str = Form(...),
+    description: str = Form(""),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    # Read uploaded file
+    contents = await file.read()
+
+    # Save MP4 locally
+    os.makedirs("uploads", exist_ok=True)
+
+    local_mp4 = f"uploads/{file.filename}"
+
+    with open(local_mp4, "wb") as f:
+        f.write(contents)
+
+    # Convert MP4 to HLS
+    hls_folder = f"hls_output/{file.filename}"
+
+    playlist_path = convert_to_hls(
+        local_mp4,
+        hls_folder
+    )
+
+    # Upload generated HLS files to Azure Blob Storage
+    for root, dirs, files in os.walk(hls_folder):
+
+        for filename in files:
+
+            filepath = os.path.join(
+                root,
+                filename
+            )
+
+            blob_name = (
+                f"{file.filename}/{filename}"
+            )
+
+            with open(filepath, "rb") as data:
+
+                container_client.upload_blob(
+                    name=blob_name,
+                    data=data,
+                    overwrite=True
+                )
+
+    # Build playlist URL
+    playlist_blob = (
+        f"{file.filename}/index.m3u8"
+    )
+
+    hls_url = (
+        f"{container_client.url}/"
+        f"{playlist_blob}"
+    )
+
+    # Save metadata in database
+    video = Video(
+        title=title,
+        description=description,
+        filename=file.filename,
+        blob_url="stored_as_hls",
+        hls_url=hls_url,
+        uploaded_by=1
+    )
+
+    db.add(video)
+    db.commit()
+    db.refresh(video)
+
+    return video
