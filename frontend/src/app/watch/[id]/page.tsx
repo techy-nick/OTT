@@ -1,14 +1,14 @@
 import VideoPlayer from "./player";
 
 async function getVideo(id: string) {
-  const res = await fetch(
+  const response = await fetch(
     `${process.env.NEXT_PUBLIC_API_URL}/videos/${id}`,
     {
       cache: "no-store",
     }
   );
 
-  return res.json();
+  return response.json();
 }
 
 export default async function WatchPage({
@@ -21,12 +21,14 @@ export default async function WatchPage({
   const video = await getVideo(id);
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl mb-4">
-        {video.title}
-      </h1>
+    <div style={{ padding: "20px" }}>
+      <h1>{video.title}</h1>
 
-      <VideoPlayer url={video.hls_url} />
+      <p>{video.description}</p>
+
+      <VideoPlayer
+        url={video.hls_url}
+      />
     </div>
   );
 }
